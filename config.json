@@ -1,0 +1,7 @@
+{
+  "port": 19822,
+  "cacheDir": "",
+  "toolTimeoutMs": 120000,
+  "sessionTtlMs": 600000,
+  "reportTtlMs": 30000
+}
