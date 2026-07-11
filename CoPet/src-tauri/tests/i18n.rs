@@ -1,0 +1,123 @@
+use copet_lib::i18n::{detect_locale_from_env, detect_locale_from_tag, t, Locale, MessageKey};
+
+#[test]
+fn detects_chinese_locale_from_environment() {
+    let locale = detect_locale_from_env([
+        ("LANGUAGE", ""),
+        ("LC_ALL", ""),
+        ("LC_MESSAGES", ""),
+        ("LANG", "zh_CN.UTF-8"),
+    ]);
+
+    assert_eq!(locale, Locale::ZhCn);
+}
+
+#[test]
+fn detects_chinese_locale_from_macos_preferred_language_tag() {
+    // macOS reports preferred languages as BCP 47 tags such as
+    // "zh-Hans-CN" — env-based detection sees no LANG on Finder-launched
+    // GUI apps, so the tag-based path must match this shape.
+    assert_eq!(detect_locale_from_tag("zh-Hans-CN"), Some(Locale::ZhCn));
+    assert_eq!(detect_locale_from_tag("zh-Hant-TW"), Some(Locale::ZhCn));
+    assert_eq!(detect_locale_from_tag("zh-CN"), Some(Locale::ZhCn));
+}
+
+#[test]
+fn detects_english_locale_from_preferred_language_tag() {
+    assert_eq!(detect_locale_from_tag("en-US"), Some(Locale::EnUs));
+    assert_eq!(detect_locale_from_tag("en-GB"), Some(Locale::EnUs));
+}
+
+#[test]
+fn returns_none_for_unsupported_language_tag() {
+    assert_eq!(detect_locale_from_tag("fr-FR"), None);
+    assert_eq!(detect_locale_from_tag(""), None);
+}
+
+#[test]
+fn defaults_to_english_for_unknown_environment() {
+    let locale = detect_locale_from_env([
+        ("LANGUAGE", ""),
+        ("LC_ALL", ""),
+        ("LC_MESSAGES", ""),
+        ("LANG", "fr_FR.UTF-8"),
+    ]);
+
+    assert_eq!(locale, Locale::EnUs);
+}
+
+#[test]
+fn localizes_tray_menu_labels() {
+    // Unchanged keys
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayBrand), "CoPet");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayQuit), "Quit");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayBrand), "CoPet");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayQuit), "退出应用");
+
+    // Settings sub-tab labels (each opens the settings window on that tab)
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayPets), "Pets…");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayPets), "宠物…");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayAgents), "Agents…");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayAgents), "Agent…");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayPreferences), "General…");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayPreferences), "通用…");
+
+    // New menu keys
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayShowPet), "Show Pet");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayShowPet), "显示宠物");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayHidePet), "Hide Pet");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayHidePet), "隐藏宠物");
+    assert_eq!(
+        t(Locale::EnUs, MessageKey::TrayShowMessages),
+        "Show Messages"
+    );
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayShowMessages), "显示消息");
+    assert_eq!(
+        t(Locale::EnUs, MessageKey::TrayHideMessages),
+        "Hide Messages"
+    );
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayHideMessages), "隐藏消息");
+    assert_eq!(
+        t(Locale::EnUs, MessageKey::TrayResetPosition),
+        "Reset Pet Position"
+    );
+    assert_eq!(
+        t(Locale::ZhCn, MessageKey::TrayResetPosition),
+        "重置宠物位置"
+    );
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayLanguageMenu), "Language");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayLanguageMenu), "语言");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayLanguageEnglish), "English");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayLanguageEnglish), "English");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayLanguageChinese), "中文");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayLanguageChinese), "中文");
+    assert_eq!(t(Locale::EnUs, MessageKey::TrayAbout), "About…");
+    assert_eq!(t(Locale::ZhCn, MessageKey::TrayAbout), "关于…");
+}
+
+#[test]
+fn localizes_app_menu_labels() {
+    // The macOS app menu (top-left of the screen) needs every label that
+    // embeds the app name to use the capitalized "CoPet" — the binary
+    // name fallback is lowercase and unacceptable in either locale.
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuAbout), "About CoPet");
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuHide), "Hide CoPet");
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuQuit), "Quit CoPet");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuAbout), "关于 CoPet");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuHide), "隐藏 CoPet");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuQuit), "退出 CoPet");
+
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuServices), "Services");
+    assert_eq!(
+        t(Locale::EnUs, MessageKey::AppMenuHideOthers),
+        "Hide Others"
+    );
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuShowAll), "Show All");
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuEdit), "Edit");
+    assert_eq!(t(Locale::EnUs, MessageKey::AppMenuWindow), "Window");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuServices), "服务");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuHideOthers), "隐藏其他");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuShowAll), "全部显示");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuEdit), "编辑");
+    assert_eq!(t(Locale::ZhCn, MessageKey::AppMenuWindow), "窗口");
+}

@@ -63,42 +63,51 @@ The plugin is ~370 lines of JavaScript with zero dependencies beyond Node.js bui
 
 openpet is a **plugin layer only**. It does not render anything — CoPet handles all visual output.
 
-| Component | Purpose |
-|---|---|
-| **openpet** (this repo) | Hook → state machine → HTTP reporting + CoPet events |
-| **[CoPet (forked)](https://github.com/JJ-zhang-92/CoPet)** | Visual desktop pet runtime with Thinking state support |
-| **[CoPet (upstream)](https://github.com/ChanceYu/CoPet)** | Original desktop pet platform (MIT) |
+| Component | Where | Purpose |
+|---|---|---|
+| **openpet** | This repo | Hook → state machine → HTTP reporting + CoPet events |
+| **CoPet** | [`./CoPet/`](./CoPet/) (forked, in-repo) | Visual desktop pet runtime with Thinking state |
+| **CoPet upstream** | [ChanceYu/CoPet](https://github.com/ChanceYu/CoPet) | Original platform (MIT) |
 
-### Why a CoPet fork
+### Why a CoPet fork is bundled
 
 CoPet's `AgentState` was designed for Codex IDE's API, which has no concept of an "AI agent thinking." The `thinking` event was internally mapped to the `waiting` state, causing it to share the same visual as permission prompts.
 
-Our fork adds two small changes (6 lines in `runtime_state.rs`):
+Our fork adds 20 lines across 6 files:
 
-1. **`PetStateId::Thinking`** — a distinct state variant in the enum
-2. **30-second `idleAfter` for Thinking** — upstream uses 1.5s for all temporary states, but LLM processing takes 5-20s. Thinking gets a dedicated 30s timeout.
+1. **`PetStateId::Thinking`** — a distinct state variant
+2. **30-second `idleAfter` for Thinking** — LLM processing takes 5-20s, not 1.5s
+3. **Frontend mapping** — thinking → review sprite row (Row 8)
 
-Full diff: [JJ-zhang-92/CoPet](https://github.com/JJ-zhang-92/CoPet) vs [upstream](https://github.com/ChanceYu/CoPet).
+The CoPet source is included directly in this repo so users can `clone` and `pnpm tauri build` in one place. An [upstream PR](https://github.com/ChanceYu/CoPet/pull/1) has been submitted — if accepted, the bundled fork can eventually be removed.
+
+### Building CoPet from this repo
+
+```bash
+cd CoPet
+pnpm install
+pnpm tauri build
+# Binary at CoPet/src-tauri/target/release/CoPet.exe
+```
+
+Copy the binary to `~/.copet/bin/CoPet.exe`, run the setup wizard, enable OpenCode integration.
 
 ---
 
 ## Quick Start
 
-### 1. Install CoPet (forked version)
-
-Download from [JJ-zhang-92/CoPet Releases](https://github.com/JJ-zhang-92/CoPet/releases) or build from source:
+### 1. Build and Install CoPet
 
 ```bash
-git clone https://github.com/JJ-zhang-92/CoPet.git
 cd CoPet
 pnpm install
 pnpm tauri build
-# Binary at src-tauri/target/release/CoPet.exe
+# Copy the binary
+cp src-tauri/target/release/CoPet.exe ~/.copet/bin/CoPet.exe   # Windows
+# cp src-tauri/target/release/CoPet ~/.copet/bin/              # macOS/Linux
 ```
 
-Run the setup wizard — select a pet and enable OpenCode integration.
-
-> If you use the upstream CoPet instead of the fork, the Thinking state will show as Waiting instead. Everything else works.
+Run CoPet, complete the setup wizard — select a pet and enable OpenCode integration.
 
 ### 2. Register Plugin
 

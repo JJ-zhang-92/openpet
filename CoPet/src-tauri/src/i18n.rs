@@ -1,0 +1,173 @@
+use serde::{Deserialize, Serialize};
+use std::env;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Locale {
+    #[serde(rename = "en-US")]
+    #[default]
+    EnUs,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LocalePreference {
+    #[serde(rename = "en-US")]
+    EnUs,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
+impl Default for LocalePreference {
+    fn default() -> Self {
+        Self::from_locale(default_locale())
+    }
+}
+
+impl LocalePreference {
+    pub fn from_locale(locale: Locale) -> Self {
+        match locale {
+            Locale::EnUs => Self::EnUs,
+            Locale::ZhCn => Self::ZhCn,
+        }
+    }
+
+    pub fn effective_locale(self) -> Locale {
+        match self {
+            Self::EnUs => Locale::EnUs,
+            Self::ZhCn => Locale::ZhCn,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKey {
+    TrayBrand,
+    TrayPets,
+    TrayAgents,
+    TrayPreferences,
+    TrayQuit,
+    SettingsWindowNotFound,
+    TrayShowPet,
+    TrayHidePet,
+    TrayShowMessages,
+    TrayHideMessages,
+    TrayResetPosition,
+    TrayLanguageMenu,
+    TrayLanguageEnglish,
+    TrayLanguageChinese,
+    TrayAbout,
+    AppMenuAbout,
+    AppMenuServices,
+    AppMenuHide,
+    AppMenuHideOthers,
+    AppMenuShowAll,
+    AppMenuQuit,
+    AppMenuEdit,
+    AppMenuWindow,
+}
+
+pub fn default_locale() -> Locale {
+    // Prefer the platform-native preference (macOS reads NSLocale /
+    // CFLocaleCopyPreferredLanguages; Windows reads
+    // GetUserPreferredUILanguages). GUI processes on macOS do not inherit
+    // shell `LANG`/`LC_*`, so env vars alone misread Chinese systems as
+    // English when the .app is launched from Finder or the Dock.
+    if let Some(tag) = sys_locale::get_locale() {
+        if let Some(locale) = detect_locale_from_tag(&tag) {
+            return locale;
+        }
+    }
+
+    detect_locale_from_env([
+        ("LANGUAGE", env::var("LANGUAGE").unwrap_or_default()),
+        ("LC_ALL", env::var("LC_ALL").unwrap_or_default()),
+        ("LC_MESSAGES", env::var("LC_MESSAGES").unwrap_or_default()),
+        ("LANG", env::var("LANG").unwrap_or_default()),
+    ])
+}
+
+pub fn detect_locale_from_tag(tag: &str) -> Option<Locale> {
+    let normalized = tag.trim().replace('_', "-").to_ascii_lowercase();
+    if normalized.starts_with("zh") {
+        return Some(Locale::ZhCn);
+    }
+    if normalized.starts_with("en") {
+        return Some(Locale::EnUs);
+    }
+    None
+}
+
+pub fn detect_locale_from_env<I, K, V>(vars: I) -> Locale
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    for (_key, value) in vars {
+        for candidate in value.as_ref().split(':') {
+            if let Some(locale) = detect_locale_from_tag(candidate) {
+                return locale;
+            }
+        }
+    }
+
+    Locale::EnUs
+}
+
+pub fn t(locale: Locale, key: MessageKey) -> &'static str {
+    match (locale, key) {
+        // Existing
+        (Locale::EnUs, MessageKey::TrayBrand) => "CoPet",
+        (Locale::EnUs, MessageKey::TrayPets) => "Pets…",
+        (Locale::EnUs, MessageKey::TrayAgents) => "Agents…",
+        (Locale::EnUs, MessageKey::TrayPreferences) => "General…",
+        (Locale::EnUs, MessageKey::TrayQuit) => "Quit",
+        (Locale::EnUs, MessageKey::SettingsWindowNotFound) => "settings window was not found",
+        (Locale::ZhCn, MessageKey::TrayBrand) => "CoPet",
+        (Locale::ZhCn, MessageKey::TrayPets) => "宠物…",
+        (Locale::ZhCn, MessageKey::TrayAgents) => "Agent…",
+        (Locale::ZhCn, MessageKey::TrayPreferences) => "通用…",
+        (Locale::ZhCn, MessageKey::TrayQuit) => "退出应用",
+        (Locale::ZhCn, MessageKey::SettingsWindowNotFound) => "未找到设置窗口",
+        // New: Pet lifecycle
+        (Locale::EnUs, MessageKey::TrayShowPet) => "Show Pet",
+        (Locale::EnUs, MessageKey::TrayHidePet) => "Hide Pet",
+        (Locale::EnUs, MessageKey::TrayShowMessages) => "Show Messages",
+        (Locale::EnUs, MessageKey::TrayHideMessages) => "Hide Messages",
+        (Locale::EnUs, MessageKey::TrayResetPosition) => "Reset Pet Position",
+        (Locale::ZhCn, MessageKey::TrayShowPet) => "显示宠物",
+        (Locale::ZhCn, MessageKey::TrayHidePet) => "隐藏宠物",
+        (Locale::ZhCn, MessageKey::TrayShowMessages) => "显示消息",
+        (Locale::ZhCn, MessageKey::TrayHideMessages) => "隐藏消息",
+        (Locale::ZhCn, MessageKey::TrayResetPosition) => "重置宠物位置",
+        // New: Language submenu
+        (Locale::EnUs, MessageKey::TrayLanguageMenu) => "Language",
+        (Locale::EnUs, MessageKey::TrayLanguageEnglish) => "English",
+        (Locale::EnUs, MessageKey::TrayLanguageChinese) => "中文",
+        (Locale::ZhCn, MessageKey::TrayLanguageMenu) => "语言",
+        (Locale::ZhCn, MessageKey::TrayLanguageEnglish) => "English",
+        (Locale::ZhCn, MessageKey::TrayLanguageChinese) => "中文",
+        // New: About
+        (Locale::EnUs, MessageKey::TrayAbout) => "About…",
+        (Locale::ZhCn, MessageKey::TrayAbout) => "关于…",
+        // macOS application menu (top-left). These override the default
+        // "<binary_name>" placeholders so labels always read "CoPet".
+        (Locale::EnUs, MessageKey::AppMenuAbout) => "About CoPet",
+        (Locale::EnUs, MessageKey::AppMenuServices) => "Services",
+        (Locale::EnUs, MessageKey::AppMenuHide) => "Hide CoPet",
+        (Locale::EnUs, MessageKey::AppMenuHideOthers) => "Hide Others",
+        (Locale::EnUs, MessageKey::AppMenuShowAll) => "Show All",
+        (Locale::EnUs, MessageKey::AppMenuQuit) => "Quit CoPet",
+        (Locale::EnUs, MessageKey::AppMenuEdit) => "Edit",
+        (Locale::EnUs, MessageKey::AppMenuWindow) => "Window",
+        (Locale::ZhCn, MessageKey::AppMenuAbout) => "关于 CoPet",
+        (Locale::ZhCn, MessageKey::AppMenuServices) => "服务",
+        (Locale::ZhCn, MessageKey::AppMenuHide) => "隐藏 CoPet",
+        (Locale::ZhCn, MessageKey::AppMenuHideOthers) => "隐藏其他",
+        (Locale::ZhCn, MessageKey::AppMenuShowAll) => "全部显示",
+        (Locale::ZhCn, MessageKey::AppMenuQuit) => "退出 CoPet",
+        (Locale::ZhCn, MessageKey::AppMenuEdit) => "编辑",
+        (Locale::ZhCn, MessageKey::AppMenuWindow) => "窗口",
+    }
+}

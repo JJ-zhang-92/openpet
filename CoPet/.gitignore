@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.worktrees/
+.pnpm-store/
+.claude/
+.codex/
+.agents/
+.superpowers/
+.antigravitycli/
+skills-lock.json
+docs/superpowers/
+node_modules/
+dist/
+test-results/
+playwright-report/
+src-tauri/gen/
+src-tauri/target/

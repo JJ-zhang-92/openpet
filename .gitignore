@@ -4,3 +4,8 @@ cache/
 __pycache__/
 *.pyc
 .DS_Store
+
+# CoPet build artifacts
+CoPet/node_modules/
+CoPet/src-tauri/target/
+CoPet/.worktrees/

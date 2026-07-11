@@ -1,0 +1,250 @@
+# Release workflow — manually triggered builds for macOS (universal) and Windows (x64).
+#
+# Failure model: the bump commit, tag, and GitHub release are only created after
+# every build matrix leg succeeds. Until then `prepare` and `build` are purely
+# read-only on `main` — any edits live only in the runner workspace.
+#
+# Recovery notes (if a run fails partway):
+#   - `prepare` or any `build` leg failed: nothing was pushed; fix the cause and re-run.
+#   - `publish` failed BEFORE pushing the tag: nothing was pushed; re-run.
+#   - `publish` failed AFTER pushing the tag (release creation hiccup): the tag and
+#     bump commit are on `main`, but the GitHub release may be missing or incomplete.
+#     Re-run `publish` — the idempotency guard skips the commit+tag+push step when
+#     the tag already exists on origin and proceeds straight to (re)creating the release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.1.2). Leave empty to auto-bump patch.'
+        required: false
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  # Force JavaScript actions to run on Node 24 ahead of the 2026-06-02 deprecation
+  # of Node 20. Lets us keep using pnpm/action-setup@v4 (no v5 release yet).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Resolve version
+        id: resolve
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            pnpm version "$INPUT_VERSION" --no-git-tag-version
+          else
+            pnpm version patch --no-git-tag-version
+          fi
+          RESOLVED=$(node -p "require('./package.json').version")
+          echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
+          echo "Resolved release version: $RESOLVED"
+          # Discard the local bump — prepare is read-only on the repo. The
+          # actual commit only happens in `publish` after every build leg
+          # succeeds, so a failed run never leaves a stale tag or bump on main.
+          git checkout -- package.json
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS: `target` is the synthetic Tauri triple; `rust-targets` is what rustup
+          # actually installs. The universal build lipos x86_64 + aarch64 darwin together.
+          - os: macos-14
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundles: dmg
+            artifact-ext: dmg
+            asset: CoPet-macos-universal.dmg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            bundles: nsis
+            artifact-ext: exe
+            asset: CoPet-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    env:
+      RESOLVED: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        # No `ref:` — the release tag does not exist yet. Build from current
+        # main and embed the resolved version locally so the produced binaries
+        # match the tag that `publish` will create.
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
+      - name: Install dependencies
+        # tauri-action does NOT run install itself — without this step the
+        # subsequent `pnpm tauri build` invocation fails with
+        # ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL because node_modules/.bin/tauri
+        # is missing. Install must run before the version bump so the
+        # lockfile and on-disk package.json match.
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply release version locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep all three version sources in lockstep so the produced binaries
+          # match the tag `publish` will create:
+          #   - package.json     → vite.config.ts embeds `npm_package_version`
+          #                        into the frontend's `__APP_VERSION__` (About panel).
+          #   - tauri.conf.json  → the bundle/installer version.
+          #   - src-tauri/Cargo.toml → Rust reads it via `env!("CARGO_PKG_VERSION")`
+          #                        for the About panel and tray menu.
+          # The edits live only in the runner workspace; the actual commit
+          # happens later in `publish` after every build leg succeeds.
+          node -e "const fs=require('fs');const p='package.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=process.env.RESOLVED;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=process.env.RESOLVED;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+          cargo set-version "$RESOLVED" --manifest-path src-tauri/Cargo.toml
+          grep '"version"' package.json src-tauri/tauri.conf.json
+          grep '^version' src-tauri/Cargo.toml
+
+      - name: Build Tauri app
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        with:
+          # No `tagName` — the action only builds and emits `artifactPaths`.
+          # The bump commit, tag, and GitHub release happen in `publish`
+          # after every matrix leg succeeds.
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Stage artifact under fixed name
+        shell: bash
+        env:
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+          ARTIFACT_EXT: ${{ matrix.artifact-ext }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          SRC=$(printf '%s' "$ARTIFACT_PATHS" | jq -r --arg ext ".$ARTIFACT_EXT" '.[] | select(endswith($ext))' | head -n 1)
+          if [ -z "$SRC" ]; then
+            echo "::error::No .$ARTIFACT_EXT bundle in artifactPaths: $ARTIFACT_PATHS"
+            exit 1
+          fi
+          echo "Staging $SRC -> dist-release/$ASSET"
+          cp "$SRC" "dist-release/$ASSET"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist-release/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      RESOLVED: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit bump and push tag
+        run: |
+          set -euo pipefail
+          # Idempotency: if a prior publish run already pushed the tag, skip
+          # the commit+push so a re-run can proceed straight to (re)creating
+          # the GitHub release without colliding on an existing tag.
+          if git ls-remote --tags --exit-code origin "v$RESOLVED" >/dev/null 2>&1; then
+            echo "Tag v$RESOLVED already exists on origin; skipping commit+tag+push."
+            exit 0
+          fi
+          node -e "const fs=require('fs');const p='package.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=process.env.RESOLVED;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=process.env.RESOLVED;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');"
+          # set-version also rewrites Cargo.lock's package entry, so commit both.
+          cargo set-version "$RESOLVED" --manifest-path src-tauri/Cargo.toml
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "chore(release): v$RESOLVED"
+          git tag "v$RESOLVED"
+          git push origin HEAD:main
+          git push origin "v$RESOLVED"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -la dist-release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: v${{ needs.prepare.outputs.version }}
+          files: |
+            dist-release/CoPet-macos-universal.dmg
+            dist-release/CoPet-windows-x64.exe
+          draft: false
+          prerelease: false
+          make_latest: 'true'
+          generate_release_notes: true
+          fail_on_unmatched_files: true
