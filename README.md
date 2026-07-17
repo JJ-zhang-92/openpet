@@ -81,6 +81,19 @@ Our fork adds 20 lines across 6 files:
 
 The CoPet source is included directly in this repo so users can `clone` and `pnpm tauri build` in one place. An [upstream PR](https://github.com/ChanceYu/CoPet/pull/1) has been submitted — if accepted, the bundled fork can eventually be removed.
 
+#### Enhancements beyond upstream
+
+This fork adds the following features on top of CoPet (by ChanceYu, MIT):
+
+| Feature | Description |
+|---|---|
+| **Thinking state** | A distinct `PetStateId::Thinking` with 30s `idleAfter` — keeps the pet in thinking animation during LLM processing (5–20s gaps) |
+| **Font size control** | Independent slider (8–32px) for notification text size, decoupled from pet scaling |
+| **Urgency coloring** | Messages color-coded by interaction urgency — waiting=red / error=orange / running=blue / thinking=gray / done=light gray |
+| **Adaptive font scaling** | Text size scales with urgency — waiting messages 1.3× larger, done messages 0.75× smaller |
+
+All enhancements built on [CoPet](https://github.com/ChanceYu/CoPet) by ChanceYu (MIT).
+
 ### Building CoPet from this repo
 
 ```bash
